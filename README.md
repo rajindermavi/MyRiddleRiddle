@@ -1,2 +1,2 @@
 # MyRiddleRiddle
-Extracting riddles from riddle podcast
+Extracting riddles from a riddle podcast
