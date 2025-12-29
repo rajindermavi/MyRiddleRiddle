@@ -18,3 +18,7 @@ STG_1_META = META_DIR / 'stg_1_downloads.json'
 STG_2_DIR = DATA_DIR / 'stg_2_transcript'
 STG_2_DIR.mkdir(parents=True,exist_ok=True)
 STG_2_META = META_DIR / 'stg_2_transcript.json'
+
+STG_3_DIR = DATA_DIR / 'stg_3_scoring'
+STG_3_DIR.mkdir(parents=True,exist_ok=True)
+STG_3_META = META_DIR / 'stg_3_scoring.json'

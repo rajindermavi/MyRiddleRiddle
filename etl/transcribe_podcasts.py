@@ -10,7 +10,8 @@ def transcribe_audio(
     audio_path: Path,
     model_size: str = MODEL_SIZE,
     device: str = "cpu",
-    compute_type: str = "int8"
+    compute_type: str = "int8",
+    word_timestamps: bool = False
 ) -> Dict[str, Any]:
     """
     Transcribe a single audio file using Whisper.
@@ -20,6 +21,7 @@ def transcribe_audio(
         model_size: Whisper model size (tiny, base, small, medium, large)
         device: Device to use (cpu, cuda)
         compute_type: Compute type (int8, float16, float32)
+        word_timestamps: Enable word-level timestamps
 
     Returns:
         Dictionary containing transcription metadata and segments
@@ -30,21 +32,58 @@ def transcribe_audio(
         compute_type=compute_type
     )
 
-    segments, info = model.transcribe(str(audio_path))
+    segments, info = model.transcribe(
+        str(audio_path),
+        word_timestamps=word_timestamps
+    )
 
-    # Convert segments to list of dicts
+    # Convert segments to list of dicts with full metadata
     segment_list = []
     for seg in segments:
-        segment_list.append({
+        segment_dict = {
+            "id": seg.id,
             "start": seg.start,
             "end": seg.end,
-            "text": seg.text.strip()
-        })
+            "text": seg.text.strip(),
+            "avg_logprob": seg.avg_logprob,
+            "no_speech_prob": seg.no_speech_prob,
+            "compression_ratio": seg.compression_ratio,
+        }
+
+        # Add optional fields if they exist
+        if hasattr(seg, 'temperature') and seg.temperature is not None:
+            segment_dict["temperature"] = seg.temperature
+
+        if hasattr(seg, 'seek'):
+            segment_dict["seek"] = seg.seek
+
+        # Add word-level timestamps if available
+        if hasattr(seg, 'words') and seg.words:
+            segment_dict["words"] = [
+                {
+                    "word": word.word,
+                    "start": word.start,
+                    "end": word.end,
+                    "probability": word.probability
+                }
+                for word in seg.words
+            ]
+
+        segment_list.append(segment_dict)
+
+    # Calculate speech ratio
+    speech_ratio = None
+    if info.duration and info.duration > 0:
+        speech_ratio = info.duration_after_vad / info.duration if info.duration_after_vad else None
 
     return {
         "audio_path": str(audio_path),
         "language": info.language,
         "language_probability": info.language_probability,
+        "duration": info.duration,
+        "duration_after_vad": info.duration_after_vad,
+        "speech_ratio": speech_ratio,
+        "all_language_probs": info.all_language_probs if hasattr(info, 'all_language_probs') and info.all_language_probs else None,
         "segments": segment_list
     }
 
@@ -100,15 +139,54 @@ def transcribe_podcasts(
         )
 
         print(f"Language: {result['language']} (probability: {result['language_probability']:.2f})")
+        print(f"Duration: {result['duration']:.2f}s (speech: {result['duration_after_vad']:.2f}s, ratio: {result['speech_ratio']:.2%})")
         print(f"Segments: {len(result['segments'])}")
 
-        # Save individual transcription to text file
-        transcript_filename = audio_path.stem + "_transcript.txt"
+        # Save individual transcription to JSON file
+        transcript_filename = audio_path.stem + ".json"
         transcript_path = output_dir / transcript_filename
 
+        # Build segments dictionary with full metadata
+        segments_dict = {}
+        for idx, seg in enumerate(result['segments'], 1):
+            seg_data = {
+                'id': seg['id'],
+                'text': seg['text'],
+                'duration': seg['end'] - seg['start'],
+                'start': seg['start'],
+                'end': seg['end'],
+                'avg_logprob': seg['avg_logprob'],
+                'no_speech_prob': seg['no_speech_prob'],
+                'compression_ratio': seg['compression_ratio']
+            }
+
+            # Add optional fields if present
+            if 'temperature' in seg:
+                seg_data['temperature'] = seg['temperature']
+
+            if 'seek' in seg:
+                seg_data['seek'] = seg['seek']
+
+            if 'words' in seg:
+                seg_data['words'] = seg['words']
+
+            segments_dict[f's{idx}'] = seg_data
+
+        transcript_data = {
+            'language': result['language'],
+            'language_probability': result['language_probability'],
+            'duration': result['duration'],
+            'duration_after_vad': result['duration_after_vad'],
+            'speech_ratio': result['speech_ratio'],
+            'segments': segments_dict
+        }
+
+        # Add all_language_probs if available
+        if result['all_language_probs']:
+            transcript_data['all_language_probs'] = result['all_language_probs']
+
         with transcript_path.open('w', encoding='utf-8') as f:
-            for seg in result['segments']:
-                f.write(f"[{seg['start']:.2f} → {seg['end']:.2f}] {seg['text']}\n")
+            json.dump(transcript_data, f, indent=2)
 
         print(f"Saved transcript to: {transcript_path}")
 

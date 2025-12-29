@@ -147,7 +147,7 @@ def extract_items(feed_xml: bytes) -> List[Dict[str, Any]]:
         pub_dt = parse_pub_date(pub_date_raw)
         enclosure = item.find("enclosure")
         enclosure_url = enclosure.get("url") if enclosure is not None else ""
-        enclosure_length = parse_int(enclosure.get("length")) if enclosure is not None else None
+        enclosure_length = parse_int(enclosure.get("duration")) if enclosure is not None else None
         enclosure_type = enclosure.get("type") if enclosure is not None else None
 
         media_content = find_child_by_localname(item, "content")

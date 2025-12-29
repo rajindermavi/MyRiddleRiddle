@@ -11,7 +11,7 @@ from config import (
 download_podcasts_config = {
     'start_date': None,
     'end_date': None,
-    'limit': 1,
+    'limit': 10,
     'output_dir': STG_1_DIR,
     'metadata_file': STG_1_META,
     'sort_order': 'asc',
