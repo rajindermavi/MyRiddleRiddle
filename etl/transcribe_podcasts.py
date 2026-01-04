@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 from faster_whisper import WhisperModel
+from utilities.utility import get_prior_metadata, merge_metadata, save_json
 
 MODEL_SIZE = "small"  # good balance for CPU
 
@@ -105,10 +106,12 @@ def transcribe_podcasts(
         output_metadata_path: Path to save transcription metadata
         model_size: Whisper model size
         device: Device to use (cpu, cuda)
-        compute_type: Compute type (int8, float16, float32)
+    compute_type: Compute type (int8, float16, float32)
     """
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    prior_metadata, _ = get_prior_metadata(output_metadata_path)
 
     # Load podcast metadata
     with metadata_path.open('r', encoding='utf-8') as f:
@@ -118,13 +121,46 @@ def transcribe_podcasts(
         print("No podcasts found in metadata file.")
         return
 
+    existing_transcripts_by_audio_path: Dict[Path, Path] = {}
+    for entry in prior_metadata:
+        file_path_raw = entry.get("file_path")
+        transcript_path_raw = entry.get("transcript_path")
+        if not file_path_raw or not transcript_path_raw:
+            continue
+        transcript_path = Path(transcript_path_raw)
+        if transcript_path.exists():
+            existing_transcripts_by_audio_path[Path(file_path_raw).resolve()] = transcript_path
+
     transcription_results = []
 
     for i, podcast in enumerate(podcasts, 1):
         audio_path = Path(podcast['file_path'])
+        audio_resolved = audio_path.resolve()
 
         if not audio_path.exists():
             print(f"Warning: Audio file not found: {audio_path}")
+            continue
+
+        transcript_path = existing_transcripts_by_audio_path.get(audio_resolved) or output_dir / (audio_path.stem + ".json")
+
+        if transcript_path.exists():
+            print(f"\n[{i}/{len(podcasts)}] Skipping transcription (already exists): {transcript_path}")
+            try:
+                with transcript_path.open('r', encoding='utf-8') as tf:
+                    existing_data = json.load(tf)
+                transcription_results.append({
+                    **podcast,
+                    "transcript_path": str(transcript_path),
+                    "language": existing_data.get("language"),
+                    "language_probability": existing_data.get("language_probability"),
+                    "num_segments": len(existing_data.get("segments", {}))
+                })
+            except Exception as exc:
+                print(f"Warning: Failed to load existing transcript {transcript_path}: {exc}")
+                transcription_results.append({
+                    **podcast,
+                    "transcript_path": str(transcript_path)
+                })
             continue
 
         print(f"\n[{i}/{len(podcasts)}] Transcribing: {podcast['title']}")
@@ -200,8 +236,9 @@ def transcribe_podcasts(
         })
 
     # Save transcription metadata
-    with output_metadata_path.open('w', encoding='utf-8') as f:
-        json.dump(transcription_results, f, indent=2)
+    output_metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    combined_metadata = merge_metadata(prior_metadata, transcription_results)
+    save_json(combined_metadata, output_metadata_path)
 
     print(f"\n✓ Transcribed {len(transcription_results)} podcast(s)")
     print(f"✓ Saved transcription metadata to: {output_metadata_path}")

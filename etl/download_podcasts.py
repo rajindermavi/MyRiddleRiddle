@@ -16,39 +16,15 @@ Examples:
 
 import datetime as dt
 import email.utils
-import json
 import pathlib
 import re
 import shutil
-import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
 
-
-# def parse_args() -> argparse.Namespace:
-#     parser = argparse.ArgumentParser(description="Download podcast audio files from an RSS feed.")
-#     parser.add_argument("rss_url", help="URL to the RSS feed.")
-#     parser.add_argument("--start-date", required=True, help="Inclusive start date (YYYY-MM-DD).")
-#     parser.add_argument("--end-date", required=True, help="Inclusive end date (YYYY-MM-DD).")
-#     parser.add_argument(
-#         "--limit",
-#         type=int,
-#         default=10,
-#         help="Maximum number of episodes to download within the date range (default: 10).",
-#     )
-#     parser.add_argument(
-#         "--output-dir",
-#         default="downloads",
-#         help="Directory to store downloaded audio files (default: downloads).",
-#     )
-#     parser.add_argument(
-#         "--metadata-file",
-#         help="Path to write metadata JSON (default: <output-dir>/metadata.json).",
-#     )
-#     return parser.parse_args()
-
+from utilities.utility import save_json, merge_metadata, get_prior_metadata
 
 def parse_iso_date(value: str) -> dt.date:
     try:
@@ -225,28 +201,31 @@ def write_metadata(entries: List[Dict[str, Any]], metadata_path: pathlib.Path) -
     serializable = []
     for entry in entries:
         published = entry.get("published")
-        duration_seconds = entry.get("duration_seconds")
+        if isinstance(published, dt.datetime):
+            published_value = published.isoformat()
+        else:
+            published_value = published if published else None
+
         serializable.append(
             {
-                "title": entry["title"],
-                "published": published.isoformat() if published else None,
-                "published_raw": entry["published_raw"],
-                "description": entry["description"],
-                "guid": entry["guid"],
-                "audio_url": entry["audio_url"],
+                "title": entry.get("title") or "untitled",
+                "published": published_value,
+                "published_raw": entry.get("published_raw"),
+                "description": entry.get("description"),
+                "guid": entry.get("guid"),
+                "audio_url": entry.get("audio_url"),
                 "mime_type": entry.get("mime_type"),
                 "feed_size_bytes": entry.get("feed_size_bytes"),
                 "file_size_bytes": entry.get("file_size_bytes"),
                 "bitrate_kbps": entry.get("bitrate_kbps"),
                 "bitrate_source": entry.get("bitrate_source"),
-                "duration_seconds": duration_seconds,
+                "duration_seconds": entry.get("duration_seconds"),
                 "duration_source": entry.get("duration_source"),
-                "file_path": str(entry["file_path"]),
+                "file_path": str(entry.get("file_path")) if entry.get("file_path") else None,
             }
         )
 
-    with metadata_path.open("w", encoding="utf-8") as f:
-        json.dump(serializable, f, indent=2)
+    save_json(serializable, metadata_path)
 
 
 def download_podcasts(
@@ -272,6 +251,8 @@ def download_podcasts(
 
     output_dir = pathlib.Path(output_dir or 'downloads')
     metadata_path = pathlib.Path(metadata_file) if metadata_file else output_dir / "metadata.json"
+
+    prior_metadata, existing_files_by_url = get_prior_metadata(metadata_path)
 
     print(f"Fetching feed from {rss_url}...")
     feed_xml = fetch_feed(rss_url)
@@ -300,8 +281,25 @@ def download_podcasts(
     to_download = filtered[:max_items] if max_items else filtered
 
     downloaded_entries = []
+    new_download_count = 0
     for episode in to_download:
-        audio_path = download_audio(episode["audio_url"], output_dir, episode["title"])
+        base_name = sanitize_filename(episode["title"])
+        ext = file_extension_from_url(episode["audio_url"])
+
+        existing_path = existing_files_by_url.get(episode["audio_url"])
+        if not existing_path or not existing_path.exists():
+            matching_files = sorted(output_dir.glob(f"{base_name}*{ext}"))
+            existing_path = next((path for path in matching_files if path.is_file()), None)
+
+        used_existing_file = existing_path is not None
+        if used_existing_file:
+            audio_path = existing_path
+            print(f"Skipping download (already exists): {episode['title']} -> {audio_path}")
+        else:
+            audio_path = download_audio(episode["audio_url"], output_dir, episode["title"])
+            new_download_count += 1
+            print(f"Downloaded: {episode['title']} -> {audio_path}")
+
         episode["file_path"] = audio_path
 
         # File size and fidelity calculations
@@ -334,7 +332,8 @@ def download_podcasts(
             }
         )
         downloaded_entries.append(episode)
-        print(f"Downloaded: {episode['title']} -> {audio_path}")
 
-    write_metadata(downloaded_entries, metadata_path)
-    print(f"Saved metadata for {len(downloaded_entries)} episode(s) to {metadata_path}")
+    combined_metadata = merge_metadata(prior_metadata, downloaded_entries)
+    write_metadata(combined_metadata, metadata_path)
+    print(f"Saved metadata for {len(downloaded_entries)} episode(s) "
+          f"({new_download_count} new download(s)) to {metadata_path}")
