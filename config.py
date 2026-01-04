@@ -19,6 +19,10 @@ STG_2_DIR = DATA_DIR / 'stg_2_transcript'
 STG_2_DIR.mkdir(parents=True,exist_ok=True)
 STG_2_META = META_DIR / 'stg_2_transcript.json'
 
-STG_3_DIR = DATA_DIR / 'stg_3_scoring'
+STG_3_DIR = DATA_DIR / 'stg_3_diarization'
 STG_3_DIR.mkdir(parents=True,exist_ok=True)
-STG_3_META = META_DIR / 'stg_3_scoring.json'
+STG_3_META = META_DIR / 'stg_3_diarization.json'
+
+STG_4_DIR = DATA_DIR / 'stg_4_scoring'
+STG_4_DIR.mkdir(parents=True,exist_ok=True)
+STG_4_META = META_DIR / 'stg_4_scoring.json'

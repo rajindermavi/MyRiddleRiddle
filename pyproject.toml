@@ -8,6 +8,7 @@ dependencies = [
     "faster-whisper>=1.2.1",
     "numpy>=2.4.0",
     "pandas>=2.3.3",
+    "pyannote-audio>=4.0.3",
     "regex>=2025.11.3",
     "scikit-learn>=1.8.0",
     "sentence-transformers>=5.2.0",
